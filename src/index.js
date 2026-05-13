@@ -435,80 +435,82 @@ async function getTenantInfo() {
 // ============================================================================
 
 async function createNewApplication() {
-  let details;
+  const onCancel = () => {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
+  };
 
-  if (FLAGS.appName != null || FLAGS.appType != null) {
-    details = {
-      name: FLAGS.appName ?? "Token Vault App",
-      type: FLAGS.appType ?? "regular",
-    };
-  } else {
-    details = await p.group(
-      {
-        name: () =>
-          p.text({
-            message: "Enter application name:",
-            placeholder: "Token Vault App",
-            defaultValue: "Token Vault App",
-          }),
-        type: () =>
-          p.select({
-            message: "Select application type:",
-            options: [
-              {
-                value: "regular",
-                label: "Regular Web Application",
-                hint: "Web apps with a secure backend",
-              },
-              {
-                value: "m2m",
-                label: "Machine to Machine",
-                hint: "Backend services and workers",
-              },
-            ],
-          }),
-      },
-      {
-        onCancel: () => {
-          p.cancel("Setup cancelled.");
-          process.exit(0);
-        },
-      },
-    );
+  // Prompt only for fields that weren't provided via flags. Previously
+  // setting either --app-name OR --app-type short-circuited both prompts
+  // and silently defaulted the other one, so `--app-type=regular` alone
+  // would silently create an app named "Token Vault App".
+  let name = FLAGS.appName;
+  let type = FLAGS.appType;
+  if (name == null || type == null) {
+    const appPrompts = {};
+    if (name == null) {
+      appPrompts.name = () =>
+        p.text({
+          message: "Enter application name:",
+          placeholder: "Token Vault App",
+          defaultValue: "Token Vault App",
+        });
+    }
+    if (type == null) {
+      appPrompts.type = () =>
+        p.select({
+          message: "Select application type:",
+          options: [
+            {
+              value: "regular",
+              label: "Regular Web Application",
+              hint: "Web apps with a secure backend",
+            },
+            {
+              value: "m2m",
+              label: "Machine to Machine",
+              hint: "Backend services and workers",
+            },
+          ],
+        });
+    }
+    const answered = await p.group(appPrompts, { onCancel });
+    name ??= answered.name;
+    type ??= answered.type;
   }
+
+  const details = { name, type };
 
   let callbackUrls = [];
   let logoutUrls = [];
 
   if (details.type === "regular") {
-    if (FLAGS.callbackUrls != null || FLAGS.logoutUrls != null) {
-      callbackUrls = parseUrlList(FLAGS.callbackUrls);
-      logoutUrls = parseUrlList(FLAGS.logoutUrls);
-    } else {
-      const urlDetails = await p.group(
-        {
-          callbackUrls: () =>
-            p.text({
-              message: "Enter callback URLs (comma-separated, optional):",
-              placeholder: "http://localhost:3000/callback",
-            }),
-          logoutUrls: () =>
-            p.text({
-              message: "Enter logout URLs (comma-separated, optional):",
-              placeholder: "http://localhost:3000",
-            }),
-        },
-        {
-          onCancel: () => {
-            p.cancel("Setup cancelled.");
-            process.exit(0);
-          },
-        },
-      );
-
-      callbackUrls = parseUrlList(urlDetails.callbackUrls);
-      logoutUrls = parseUrlList(urlDetails.logoutUrls);
+    // Same decoupling for URLs: ask for whichever list wasn't provided.
+    let callbackRaw = FLAGS.callbackUrls;
+    let logoutRaw = FLAGS.logoutUrls;
+    if (callbackRaw == null || logoutRaw == null) {
+      const urlPrompts = {};
+      if (callbackRaw == null) {
+        urlPrompts.callbackUrls = () =>
+          p.text({
+            message: "Enter callback URLs (comma-separated, optional):",
+            placeholder: "http://localhost:3000/callback",
+          });
+      }
+      if (logoutRaw == null) {
+        urlPrompts.logoutUrls = () =>
+          p.text({
+            message: "Enter logout URLs (comma-separated, optional):",
+            placeholder: "http://localhost:3000",
+          });
+      }
+      const urlAnswered = await p.group(urlPrompts, { onCancel });
+      callbackRaw ??= urlAnswered.callbackUrls;
+      logoutRaw ??= urlAnswered.logoutUrls;
     }
+
+    callbackUrls = parseUrlList(callbackRaw);
+    logoutUrls = parseUrlList(logoutRaw);
   }
 
   const s = p.spinner();
